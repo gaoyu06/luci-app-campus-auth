@@ -1,0 +1,305 @@
+#!/bin/sh
+
+STATE="/var/run/campus_auth.state"
+ACCT_STATE="/var/run/campus_auth_acct.state"
+LOG="/var/log/campus_auth.log"
+
+cfg() {
+    uci -q get "campus_auth.main.$1" 2>/dev/null || true
+}
+
+write_state() {
+    umask 077
+    {
+        printf 'state=%s\n' "$1"
+        printf 'message=%s\n' "$2"
+        printf 'updated=%s\n' "$(date '+%Y-%m-%d %H:%M:%S')"
+        shift 2
+        for item in "$@"; do
+            printf '%s\n' "$item"
+        done
+    } > "$STATE"
+}
+
+state_value() {
+    sed -n "s/^$1=//p" "$STATE" 2>/dev/null | head -n 1
+}
+
+log() {
+    printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "$LOG"
+}
+
+save_account_status() {
+    local user="$1" flow="$2" fee="$3" tmp
+    [ -n "$user" ] || return
+    tmp="$(mktemp -t campus-auth-acct.XXXXXX)"
+    if [ -f "$ACCT_STATE" ]; then
+        grep -v "^$user " "$ACCT_STATE" >> "$tmp" 2>/dev/null
+    fi
+    printf '%s %s %s\n' "$user" "${flow:--}" "${fee:--}" >> "$tmp"
+    mv "$tmp" "$ACCT_STATE"
+}
+
+value_from_html() {
+    sed -n "s/.*$1='\([^']*\)'.*/\1/p" "$2" | head -n 1 | sed 's/[[:space:]]*$//'
+}
+
+account_sections() {
+    uci -q show campus_auth 2>/dev/null | sed -n 's/^campus_auth\.\([^.=]*\)=account$/\1/p'
+}
+
+ensure_legacy_account() {
+    local sec
+    [ -n "$(account_sections)" ] && return
+    legacy_configured || return
+    sec="$(uci add campus_auth account)"
+    uci set "campus_auth.$sec.enabled=1"
+    uci set "campus_auth.$sec.priority=10"
+    uci set "campus_auth.$sec.username=$(cfg username)"
+    uci set "campus_auth.$sec.password=$(cfg password)"
+    uci commit campus_auth
+}
+
+sorted_accounts() {
+    local sec enabled priority
+    for sec in $(account_sections); do
+        enabled="$(uci -q get "campus_auth.$sec.enabled" 2>/dev/null || echo 0)"
+        [ "$enabled" = "1" ] || continue
+        priority="$(uci -q get "campus_auth.$sec.priority" 2>/dev/null || echo 100)"
+        printf '%s|%s\n' "${priority:-100}" "$sec"
+    done | sort -n -t '|' -k 1,1 -k 2,2
+}
+
+legacy_configured() {
+    [ -n "$(cfg username)" ] && [ -n "$(cfg password)" ]
+}
+
+first_account() {
+    local line
+    line="$(sorted_accounts | head -n 1)"
+    [ -n "$line" ] && printf '%s\n' "${line#*|}"
+}
+
+active_account() {
+    local active
+    active="$(cfg active_account)"
+    if [ -n "$active" ] && { [ "$active" = "main" ] || account_sections | grep -qx "$active"; }; then
+        printf '%s\n' "$active"
+        return
+    fi
+    active="$(first_account)"
+    [ -n "$active" ] && printf '%s\n' "$active" && return
+    legacy_configured && printf '%s\n' main
+}
+
+account_value() {
+    local sec="$1" option="$2"
+    if [ "$sec" = "main" ]; then
+        cfg "$option"
+    else
+        uci -q get "campus_auth.$sec.$option" 2>/dev/null || true
+    fi
+}
+
+login_account() {
+    local sec="$1" username password portal pid calg hash upass response
+    username="$(account_value "$sec" username)"
+    password="$(account_value "$sec" password)"
+    portal="$(cfg portal_url)"
+    portal="${portal:-http://172.18.3.3/0.htm}"
+    pid="$(cfg pid)"
+    calg="$(cfg calg)"
+    pid="${pid:-2}"
+    calg="${calg:-12345678}"
+
+    if [ -z "$username" ] || [ -z "$password" ] || [ -z "$portal" ]; then
+        write_state "not_configured" "登录地址、账号和密码不能为空" "account=$sec" "account_user=$username"
+        return 2
+    fi
+
+    hash="$(printf '%s' "${pid}${password}${calg}" | md5sum | cut -c1-32)"
+    upass="${hash}${calg}${pid}"
+    response="$(mktemp -t campus-auth.XXXXXX)"
+
+    if ! curl -k -sS -L --connect-timeout 5 --max-time 15 \
+        -H 'Content-Type: application/x-www-form-urlencoded' \
+        -H "Origin: ${portal%/*}" \
+        -H "Referer: $portal" \
+        --data-urlencode "DDDDD=$username" \
+        --data-urlencode "upass=$upass" \
+        --data-urlencode 'R1=0' \
+        --data-urlencode 'R2=1' \
+        --data-urlencode 'para=00' \
+        --data-urlencode '0MKKey=123456' \
+        --data-urlencode 'v6ip=' \
+        -o "$response" "$portal"; then
+        write_state "error" "登录请求失败" "account=$sec" "account_user=$username"
+        log "login request failed for $sec"
+        rm -f "$response"
+        return 1
+    fi
+
+    if grep -q 'Dr.COMWebLoginID_3.htm\|您已经成功登录' "$response"; then
+        uci set campus_auth.main.active_account="$sec"
+        uci commit campus_auth
+        write_state "online" "登录成功" "account=$sec" "account_user=$username"
+        log "login successful for $sec"
+        rm -f "$response"
+        status
+        return 0
+    fi
+
+    write_state "failed" "登录被拒绝" "account=$sec" "account_user=$username"
+    log "login rejected for $sec"
+    rm -f "$response"
+    return 1
+}
+
+login() {
+    local sec current
+    sec="$(active_account)"
+    if [ -z "$sec" ]; then
+        write_state "not_configured" "请先添加至少一个账号"
+        return 2
+    fi
+    current="$(state_value account)"
+    if [ -n "$current" ] && [ "$current" != "$sec" ]; then
+        logout >/dev/null 2>&1 || true
+    fi
+    login_account "$sec"
+}
+
+status() {
+    local status_url response time flow fee uid v4ip account account_user
+    status_url="$(cfg status_url)"
+    status_url="${status_url:-http://172.18.3.3/}"
+    response="$(mktemp -t campus-auth-status.XXXXXX)"
+    account="$(state_value account)"
+    [ -n "$account" ] || account="$(active_account)"
+    account_user="$(account_value "$account" username)"
+
+    if ! curl -k -sS -L --connect-timeout 5 --max-time 10 -o "$response" "$status_url"; then
+        write_state "unknown" "状态页请求失败" "account=$account"
+        rm -f "$response"
+        return 1
+    fi
+
+    if grep -q 'Dr.COMWebLoginID_1.htm\|Dr.COMWebLoginID_3.htm\|已经成功登录' "$response"; then
+        time="$(value_from_html time "$response")"
+        flow="$(value_from_html flow "$response")"
+        fee="$(value_from_html fee "$response")"
+        uid="$(value_from_html uid "$response")"
+        v4ip="$(value_from_html v4ip "$response")"
+        local flow_int flow_frac flow_display fee_int fee_frac fee_display
+        flow_int=0
+        flow_frac=0
+        if [ -n "$flow" ] 2>/dev/null; then
+            flow_frac=$((flow % 1024))
+            flow_int=$((flow - flow_frac))
+            flow_frac=$((flow_frac * 1000))
+            flow_frac=$((flow_frac - flow_frac % 1024))
+            flow_int=$((flow_int / 1024))
+            flow_frac=$((flow_frac / 1024))
+        fi
+        if [ "$flow_frac" -lt 10 ]; then
+            flow_display="${flow_int}.00${flow_frac}"
+        elif [ "$flow_frac" -lt 100 ]; then
+            flow_display="${flow_int}.0${flow_frac}"
+        else
+            flow_display="${flow_int}.${flow_frac}"
+        fi
+
+        fee_int=0
+        fee_frac=0
+        if [ -n "$fee" ] 2>/dev/null; then
+            fee_int=$((fee - fee % 100))
+            fee_frac=$(((fee_int % 10000) / 100))
+            fee_int=$((fee_int / 10000))
+        fi
+        if [ "$fee_frac" -lt 10 ]; then
+            fee_display="${fee_int}.0${fee_frac}"
+        else
+            fee_display="${fee_int}.${fee_frac}"
+        fi
+
+        write_state "online" "状态页可用" \
+            "account=$account" "account_user=$account_user" "time=$time" "flow=$flow_display" "fee=$fee_display" "uid=$uid" "v4ip=$v4ip"
+        save_account_status "$account_user" "$flow_display" "$fee_display"
+    else
+        write_state "offline" "状态页显示未认证" "account=$account" "account_user=$account_user"
+    fi
+    rm -f "$response"
+}
+
+logout() {
+    local logout_url
+    logout_url="$(cfg logout_url)"
+    logout_url="${logout_url:-http://172.18.3.3/F.htm}"
+    if curl -k -sS -L --connect-timeout 5 --max-time 10 -o /dev/null "$logout_url"; then
+        write_state "offline" "已注销"
+        log "logout requested"
+        return 0
+    fi
+    write_state "error" "注销请求失败"
+    return 1
+}
+
+switch_account() {
+    local current next line found
+    current="$(state_value account)"
+    next=""
+    found=0
+    while IFS='|' read -r _ line; do
+        [ -n "$line" ] || continue
+        if [ "$found" -eq 1 ]; then
+            next="$line"
+            break
+        fi
+        [ "$line" = "$current" ] && found=1
+    done <<EOF
+$(sorted_accounts)
+EOF
+
+    [ -n "$next" ] || next="$(first_account)"
+    [ -n "$next" ] || return 1
+    [ "$next" = "$current" ] && return 1
+
+    logout >/dev/null 2>&1 || true
+    login_account "$next"
+}
+
+monitor() {
+    local interval threshold flow_limit state fee flow should_switch
+    interval="$(cfg interval)"
+    interval="${interval:-300}"
+    threshold="$(cfg switch_balance)"
+    threshold="${threshold:-0}"
+    flow_limit="$(cfg switch_flow)"
+    flow_limit="${flow_limit:-0}"
+    while :; do
+        status >/dev/null 2>&1
+        state="$(state_value state)"
+        if [ "$state" = "offline" ]; then
+            login >/dev/null 2>&1
+        elif [ "$state" = "online" ]; then
+            fee="$(state_value fee)"
+            flow="$(state_value flow)"
+            should_switch=0
+            if [ -n "$fee" ] && awk -v fee="$fee" -v threshold="$threshold" 'BEGIN { exit !(threshold > 0 && fee <= threshold) }'; then
+                should_switch=1
+            fi
+            if [ "$should_switch" -eq 0 ] && [ -n "$flow" ] && awk -v flow="$flow" -v limit="$flow_limit" 'BEGIN { exit !(limit > 0 && flow >= limit) }'; then
+                should_switch=1
+            fi
+            if [ "$should_switch" -eq 1 ]; then
+                switch_account >/dev/null 2>&1
+            fi
+        fi
+        sleep "$interval"
+    done
+}
+
+case "$1" in
+    login|status|logout|switch|monitor) ensure_legacy_account; "$1" ;;
+    *) echo "Usage: $0 {login|status|logout|switch|monitor}" >&2; exit 2 ;;
+esac

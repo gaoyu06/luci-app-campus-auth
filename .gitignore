@@ -1,0 +1,11 @@
+/ref/
+/bin/
+/build_dir/
+/staging_dir/
+/tmp/
+*.ipk
+*.tar.gz
+*.tar
+*.swp
+.DS_Store
+/.commandcode/

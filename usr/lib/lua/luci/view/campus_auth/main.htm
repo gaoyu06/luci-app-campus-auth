@@ -1,0 +1,496 @@
+<%+header%>
+
+<style type="text/css">
+:root {
+    --ca-ink: var(--主色, #d7e0e8);
+    --ca-muted: var(--secondary-text-color, #8a98a6);
+    --ca-line: rgba(255, 255, 255, .11);
+    --ca-paper: transparent;
+    --ca-panel: rgba(24, 31, 39, .78);
+    --ca-accent: #2aa198;
+    --ca-accent-dark: #23867f;
+    --ca-warn: #d9a13b;
+    --ca-danger: #d96b6b;
+    --ca-shadow: 0 3px 12px rgba(0, 0, 0, .16);
+}
+
+html, .campus-auth-page { background-color: var(--background-color, #1e1e1e) !important; }
+.campus-auth-page #maincontent, .campus-auth-page .main, .campus-auth-page .cbi-map { background: transparent !important; }
+.campus-auth-page { min-height: 100vh; }
+.campus-auth-page #maincontent { min-height: calc(100vh - 86px); padding-top: 12px; }
+.campus-auth-shell { max-width: 1120px; margin: 0 auto; color: var(--ca-ink); font-family: "Noto Sans SC", "Microsoft YaHei", sans-serif; }
+.ca-hero { display: flex; justify-content: space-between; gap: 24px; align-items: center; padding: 16px 18px; background: var(--ca-panel); border: 1px solid var(--ca-line); border-radius: 6px; box-shadow: var(--ca-shadow); }
+.ca-hero h1 { margin: 0; font-size: 22px; line-height: 1.2; letter-spacing: 0; }
+.ca-subtitle { margin: 5px 0 0; color: var(--ca-muted); font-size: 12px; }
+.ca-status { min-width: 190px; padding: 10px 12px; border-left: 3px solid var(--ca-line); background: rgba(0, 0, 0, .12); border-radius: 4px; }
+.ca-status-line { display: flex; align-items: center; gap: 8px; font-weight: 700; }
+.ca-dot { width: 9px; height: 9px; border-radius: 50%; background: #9aa6ad; }
+.ca-dot.online { background: #159447; }
+.ca-dot.failed, .ca-dot.error { background: var(--ca-danger); }
+.ca-status-message { margin-top: 6px; color: var(--ca-muted); font-size: 12px; }
+.ca-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin: 12px 0; }
+.ca-metric { padding: 12px 14px; background: var(--ca-panel); border: 1px solid var(--ca-line); border-radius: 6px; box-shadow: var(--ca-shadow); }
+.ca-metric-label { color: var(--ca-muted); font-size: 12px; }
+.ca-metric-value { margin-top: 5px; font-size: 21px; font-weight: 700; line-height: 1.15; }
+.ca-panel { background: var(--ca-panel); border: 1px solid var(--ca-line); border-radius: 6px; box-shadow: var(--ca-shadow); overflow: hidden; }
+.ca-panel-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 14px 16px; border-bottom: 1px solid var(--ca-line); }
+.ca-panel-title { margin: 0; font-size: 15px; }
+.ca-panel-note { color: var(--ca-muted); font-size: 12px; }
+
+.ca-toolbar { margin: 12px 0; }
+.ca-toolbar-body { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 12px 16px; }
+.ca-toolbar-note { margin-left: auto; color: var(--ca-muted); font-size: 12px; }
+
+.ca-input { box-sizing: border-box; width: 100%; min-height: 32px; padding: 6px 8px; border: 1px solid var(--ca-line); border-radius: 4px; background: rgba(0, 0, 0, .14); color: var(--ca-ink); }
+.ca-input:focus { border-color: var(--ca-accent); outline: 2px solid rgba(8, 127, 140, .14); }
+.ca-btn { min-height: 32px; padding: 6px 11px; border: 1px solid var(--ca-line); border-radius: 4px; background: rgba(0, 0, 0, .12); color: var(--ca-ink); cursor: pointer; font-size: 13px; }
+.ca-btn:hover { border-color: var(--ca-accent); color: var(--ca-accent-dark); }
+.ca-btn-primary { border-color: var(--ca-accent); background: var(--ca-accent); color: #fff; }
+.ca-btn-primary:hover { background: var(--ca-accent-dark); color: #fff; }
+.ca-btn-danger { color: var(--ca-danger); }
+.ca-icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; border: 1px solid var(--ca-line); border-radius: 4px; background: rgba(0, 0, 0, .12); color: var(--ca-ink); cursor: pointer; }
+.ca-icon-btn svg { width: 15px; height: 15px; display: block; }
+.ca-icon-btn:hover { border-color: var(--ca-accent); color: var(--ca-accent-dark); }
+.ca-icon-btn:disabled { opacity: .38; cursor: not-allowed; }
+.ca-icon-btn-danger:hover { border-color: var(--ca-danger); color: var(--ca-danger); }
+
+.ca-account-scroll { overflow-x: auto; }
+.ca-account-inner { min-width: 680px; }
+.ca-account-head { display: grid; grid-template-columns: 34px 34px 54px minmax(110px, 1fr) 116px 96px 64px 142px; gap: 8px; align-items: center; padding: 9px 16px; border-bottom: 1px solid var(--ca-line); color: var(--ca-muted); font-size: 11px; font-weight: 700; }
+.ca-account-row { border-bottom: 1px solid var(--ca-line); }
+.ca-account-row:last-child { border-bottom: 0; }
+.ca-account-row.editing { background: rgba(42, 161, 152, .07); }
+.ca-row-line { display: grid; grid-template-columns: 34px 34px 54px minmax(110px, 1fr) 116px 96px 64px 142px; gap: 8px; align-items: center; padding: 10px 16px; }
+.ca-cell-center { display: flex; align-items: center; justify-content: center; }
+.ca-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 700; }
+.ca-name-empty { color: var(--ca-muted); font-weight: 400; }
+.ca-stat { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.ca-stat-label { color: var(--ca-muted); font-size: 11px; }
+.ca-stat-value { font-size: 13px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ca-ring-cell { display: flex; align-items: center; justify-content: center; }
+.ca-ring { width: 42px; height: 42px; display: block; }
+.ca-ring-bg { fill: none; stroke: rgba(255, 255, 255, .09); stroke-width: 4; }
+.ca-ring-fg { fill: none; stroke: var(--ca-accent); stroke-width: 4; stroke-linecap: round; transform: rotate(-90deg); transform-origin: 50% 50%; transition: stroke-dashoffset .4s; }
+.ca-ring-fg.warn { stroke: var(--ca-warn); }
+.ca-ring-fg.critical { stroke: var(--ca-danger); }
+.ca-ring-text { fill: var(--ca-ink); font-size: 11px; font-weight: 700; }
+.ca-row-actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
+
+.ca-edit-box { padding: 0 16px 14px; }
+.ca-edit-box[hidden] { display: none; }
+.ca-edit-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; gap: 10px 14px; align-items: end; padding: 12px; border: 1px dashed var(--ca-line); border-radius: 4px; background: rgba(0, 0, 0, .1); }
+.ca-edit-field { min-width: 0; }
+.ca-edit-field label { display: block; margin-bottom: 5px; color: var(--ca-muted); font-size: 12px; }
+.ca-edit-actions { display: flex; gap: 8px; }
+
+.ca-settings { margin-top: 12px; background: var(--ca-panel); border: 1px solid var(--ca-line); border-radius: 6px; box-shadow: var(--ca-shadow); overflow: hidden; }
+.ca-settings summary { padding: 14px 16px; cursor: pointer; font-weight: 700; list-style: none; }
+.ca-settings summary::-webkit-details-marker { display: none; }
+.ca-settings summary:before { content: "+"; display: inline-block; width: 20px; color: var(--ca-accent); font-size: 18px; line-height: 12px; }
+.ca-settings[open] summary:before { content: "−"; }
+.ca-settings-body { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 18px; padding: 0 16px 16px; border-top: 1px solid var(--ca-line); }
+.ca-field { padding-top: 12px; }
+.ca-field label { display: block; margin-bottom: 5px; color: var(--ca-muted); font-size: 12px; }
+.ca-field-help { margin-top: 4px; color: var(--ca-muted); font-size: 11px; }
+.ca-empty { padding: 24px 16px; color: var(--ca-muted); text-align: center; font-size: 13px; }
+.ca-toast { position: fixed; right: 22px; bottom: 22px; z-index: 10; display: none; max-width: 320px; padding: 10px 13px; border: 1px solid var(--ca-line); border-radius: 4px; background: #202a33; box-shadow: var(--ca-shadow); font-size: 13px; }
+.ca-toast.show { display: block; }
+.ca-toast.error { border-left: 3px solid var(--ca-danger); }
+.ca-toast.success { border-left: 3px solid #159447; }
+@media (max-width: 760px) {
+    .ca-hero { display: block; }
+    .ca-status { margin-top: 14px; }
+    .ca-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .ca-toolbar-note { display: none; }
+    .ca-settings-body { grid-template-columns: 1fr; }
+}
+</style>
+
+<div class="campus-auth-shell" id="campus-auth-app">
+    <section class="ca-hero">
+        <div>
+            <h1>校园网认证</h1>
+        </div>
+        <div class="ca-status">
+            <div class="ca-status-line"><span class="ca-dot" id="ca-status-dot"></span><span id="ca-status-label">读取中</span></div>
+            <div class="ca-status-message" id="ca-status-message">正在读取认证状态</div>
+        </div>
+    </section>
+
+    <section class="ca-metrics">
+        <div class="ca-metric"><div class="ca-metric-label">当前账号</div><div class="ca-metric-value" id="ca-account">—</div></div>
+        <div class="ca-metric"><div class="ca-metric-label">余额</div><div class="ca-metric-value" id="ca-fee">—</div></div>
+        <div class="ca-metric"><div class="ca-metric-label">已用流量</div><div class="ca-metric-value" id="ca-flow">—</div></div>
+        <div class="ca-metric"><div class="ca-metric-label">已用时长</div><div class="ca-metric-value" id="ca-time">—</div></div>
+    </section>
+
+    <section class="ca-panel ca-toolbar">
+        <div class="ca-toolbar-body">
+            <button type="button" class="ca-btn ca-btn-primary" id="ca-save">保存配置</button>
+            <button type="button" class="ca-btn" id="ca-login">立即登录</button>
+            <button type="button" class="ca-btn ca-btn-danger" id="ca-logout">注销</button>
+            <span class="ca-toolbar-note">修改账号或设置后，点击「保存配置」生效</span>
+        </div>
+    </section>
+
+    <section class="ca-panel">
+        <div class="ca-panel-head">
+            <div><h2 class="ca-panel-title">认证账号</h2></div>
+            <button type="button" class="ca-btn" id="ca-add-account">添加账号</button>
+        </div>
+        <div class="ca-account-scroll">
+            <div class="ca-account-inner">
+                <div class="ca-account-head">
+                    <span title="选择手动登录的账号">使用</span>
+                    <span title="参与自动认证与切换">启用</span>
+                    <span>剩余额度</span>
+                    <span>账号</span>
+                    <span>已用流量</span>
+                    <span>余额</span>
+                    <span title="数值越小越优先">优先级</span>
+                    <span></span>
+                </div>
+                <div id="ca-account-body"><div class="ca-empty">正在读取账号</div></div>
+            </div>
+        </div>
+    </section>
+
+    <details class="ca-settings">
+        <summary>基本设置</summary>
+        <div class="ca-settings-body">
+            <div class="ca-field"><label><input type="checkbox" id="ca-enabled" /> 启用自动认证</label><div class="ca-field-help">掉线或余额耗尽时自动处理。</div></div>
+            <div class="ca-field"><label for="ca-switch-balance">切换余额阈值（元）</label><input class="ca-input" id="ca-switch-balance" type="number" min="0" step="0.01" /></div>
+            <div class="ca-field"><label for="ca-switch-flow">已用流量上限（MB）</label><input class="ca-input" id="ca-switch-flow" type="number" min="0" step="0.01" /><div class="ca-field-help">达到上限后自动切换，填写 0 表示不限制。</div></div>
+            <div class="ca-field"><label for="ca-portal-url">登录地址</label><input class="ca-input" id="ca-portal-url" type="text" /></div>
+            <div class="ca-field"><label for="ca-status-url">状态页地址</label><input class="ca-input" id="ca-status-url" type="text" /></div>
+            <div class="ca-field"><label for="ca-logout-url">注销地址</label><input class="ca-input" id="ca-logout-url" type="text" /></div>
+            <div class="ca-field"><label for="ca-interval">检测间隔（秒）</label><input class="ca-input" id="ca-interval" type="number" min="30" step="1" /></div>
+            <div class="ca-field"><label for="ca-pid">协议 PID</label><input class="ca-input" id="ca-pid" type="number" min="0" step="1" /></div>
+            <div class="ca-field"><label for="ca-calg">协议参数</label><input class="ca-input" id="ca-calg" type="text" /></div>
+        </div>
+    </details>
+</div>
+<div class="ca-toast" id="ca-toast"></div>
+
+<script type="text/javascript">//<![CDATA[
+(function() {
+    document.body.classList.add('campus-auth-page');
+    var urls = {
+        config: '<%=url("admin", "network", "campus_auth", "config")%>',
+        status: '<%=url("admin", "network", "campus_auth", "status")%>',
+        save: '<%=url("admin", "network", "campus_auth", "save")%>',
+        login: '<%=url("admin", "network", "campus_auth", "login")%>',
+        logout: '<%=url("admin", "network", "campus_auth", "logout")%>'
+    };
+    var accounts = [];
+    var accountStatus = {};
+    var editingIndex = -1;
+    var FLOW_QUOTA_MB = 102400;
+
+    function escapeHtml(value) {
+        return String(value || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    function toast(message, error) {
+        var el = document.getElementById('ca-toast');
+        el.textContent = message;
+        el.className = 'ca-toast show ' + (error ? 'error' : 'success');
+        window.setTimeout(function() { el.className = 'ca-toast'; }, 2600);
+    }
+
+    function request(method, url, body, done) {
+        if (window.XHR) {
+            var luCIcallback = function(xhr, data) {
+                if (!data && xhr && xhr.responseText) {
+                    try { data = JSON.parse(xhr.responseText); } catch (e) {}
+                }
+                done(xhr && xhr.status >= 200 && xhr.status < 300, data || {});
+            };
+            if (method === 'GET') XHR.get(url, null, luCIcallback);
+            else (new XHR()).post(url, body || '', luCIcallback);
+            return;
+        }
+        var xhr = new XMLHttpRequest();
+        xhr.open(method, url, true);
+        if (method === 'POST') xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded; charset=UTF-8');
+        xhr.onreadystatechange = function() {
+            if (xhr.readyState !== 4) return;
+            var data = {};
+            try { data = JSON.parse(xhr.responseText || '{}'); } catch (e) {}
+            done(xhr.status >= 200 && xhr.status < 300, data);
+        };
+        xhr.send(body || null);
+    }
+
+    function setValue(id, value) { var el = document.getElementById(id); if (el) el.value = value == null ? '' : value; }
+    function setText(id, value) { var el = document.getElementById(id); if (el) el.textContent = value || '—'; }
+
+    function closestNode(node, test) {
+        while (node && node !== document) {
+            if (test(node)) return node;
+            node = node.parentNode;
+        }
+        return null;
+    }
+
+    var icons = {
+        up: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 10.5l4-4 4 4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+        down: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 5.5l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+        remove: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 4.5h10M6.5 4.5V3h3v1.5M5 4.5l.7 8.5h4.6l.7-8.5M6.7 7v4M9.3 7v4" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+    };
+
+    function iconButton(action, title, svg, extraClass, disabled) {
+        return '<button type="button" class="ca-icon-btn ' + (extraClass || '') + '" data-action="' + action + '" title="' + title + '" aria-label="' + title + '"' + (disabled ? ' disabled' : '') + '>' + svg + '</button>';
+    }
+
+    function ringSvg() {
+        return '<svg class="ca-ring" viewBox="0 0 44 44" aria-hidden="true">'
+            + '<circle class="ca-ring-bg" cx="22" cy="22" r="19" pathLength="100"></circle>'
+            + '<circle class="ca-ring-fg" cx="22" cy="22" r="19" pathLength="100" stroke-dasharray="100" stroke-dashoffset="100"></circle>'
+            + '<text class="ca-ring-text" x="22" y="26.5" text-anchor="middle">—</text>'
+            + '</svg>';
+    }
+
+    function renderAccounts() {
+        var body = document.getElementById('ca-account-body');
+        if (!accounts.length) {
+            body.innerHTML = '<div class="ca-empty">还没有账号，点击右上角「添加账号」</div>';
+            return;
+        }
+        var html = '';
+        accounts.forEach(function(account, index) {
+            var editing = editingIndex === index;
+            var username = escapeHtml(account.username);
+            html += '<div class="ca-account-row' + (editing ? ' editing' : '') + '" data-index="' + index + '">'
+                + '<div class="ca-row-line">'
+                + '<label class="ca-cell-center" title="选择手动登录的账号"><input type="radio" name="ca-active-account" data-field="active"' + (account.active ? ' checked' : '') + ' /></label>'
+                + '<label class="ca-cell-center" title="参与自动认证与切换"><input type="checkbox" data-field="enabled"' + (account.enabled ? ' checked' : '') + ' /></label>'
+                + '<div class="ca-ring-cell" title="剩余额度（按 100 GB 计算）">' + ringSvg() + '</div>'
+                + '<div class="ca-name" title="' + username + '">' + (username ? username : '<span class="ca-name-empty">未命名账号</span>') + '</div>'
+                + '<div class="ca-stat"><span class="ca-stat-label">已用流量</span><span class="ca-stat-value" data-status="flow">—</span></div>'
+                + '<div class="ca-stat"><span class="ca-stat-label">余额</span><span class="ca-stat-value" data-status="fee">—</span></div>'
+                + '<div class="ca-stat"><span class="ca-stat-label">优先级</span><span class="ca-stat-value">' + ((index + 1) * 10) + '</span></div>'
+                + '<div class="ca-row-actions">'
+                + iconButton('up', '上移', icons.up, '', index === 0)
+                + iconButton('down', '下移', icons.down, '', index === accounts.length - 1)
+                + '<button type="button" class="ca-btn" data-action="edit">' + (editing ? '收起' : '编辑') + '</button>'
+                + iconButton('remove', '删除', icons.remove, 'ca-icon-btn-danger', false)
+                + '</div>'
+                + '</div>'
+                + '<div class="ca-edit-box"' + (editing ? '' : ' hidden') + '>'
+                + '<div class="ca-edit-grid">'
+                + '<div class="ca-edit-field"><label for="ca-edit-username-' + index + '">账号</label><input class="ca-input" id="ca-edit-username-' + index + '" data-edit-field="username" type="text" value="' + username + '" /></div>'
+                + '<div class="ca-edit-field"><label for="ca-edit-password-' + index + '">密码</label><input class="ca-input" id="ca-edit-password-' + index + '" data-edit-field="password" type="password" placeholder="' + (account.password_set ? '已保存，留空不修改' : '请输入密码') + '" autocomplete="new-password" /></div>'
+                + '<div class="ca-edit-actions">'
+                + '<button type="button" class="ca-btn ca-btn-primary" data-action="edit-save">保存修改</button>'
+                + '<button type="button" class="ca-btn" data-action="edit-cancel">取消</button>'
+                + '</div>'
+                + '</div>'
+                + '</div>'
+                + '</div>';
+        });
+        body.innerHTML = html;
+        refreshRowStatus();
+    }
+
+    function refreshRowStatus() {
+        var rows = document.querySelectorAll('#ca-account-body .ca-account-row');
+        for (var i = 0; i < rows.length; i++) {
+            var row = rows[i];
+            var index = parseInt(row.getAttribute('data-index'), 10);
+            var account = accounts[index] || {};
+            var info = accountStatus[account.username] || {};
+            var flow = info.flow && info.flow !== '-' ? info.flow : '';
+            var fee = info.fee && info.fee !== '-' ? info.fee : '';
+            var flowEl = row.querySelector('[data-status="flow"]');
+            var feeEl = row.querySelector('[data-status="fee"]');
+            if (flowEl) flowEl.textContent = flow ? flow + ' MB' : '—';
+            if (feeEl) feeEl.textContent = fee ? fee + ' 元' : '—';
+            var fg = row.querySelector('.ca-ring-fg');
+            var ringText = row.querySelector('.ca-ring-text');
+            if (!fg || !ringText) continue;
+            var used = parseFloat(flow);
+            if (isNaN(used) || used < 0) {
+                fg.setAttribute('stroke-dashoffset', '100');
+                fg.setAttribute('class', 'ca-ring-fg');
+                ringText.textContent = '—';
+                continue;
+            }
+            var remaining = 100 - (used / FLOW_QUOTA_MB * 100);
+            if (remaining < 0) remaining = 0;
+            if (remaining > 100) remaining = 100;
+            fg.setAttribute('stroke-dashoffset', String((100 - remaining).toFixed(2)));
+            var cls = 'ca-ring-fg';
+            if (remaining < 10) cls = 'ca-ring-fg critical';
+            else if (remaining < 30) cls = 'ca-ring-fg warn';
+            fg.setAttribute('class', cls);
+            ringText.textContent = Math.round(remaining) + '%';
+        }
+    }
+
+    function renderConfig(data) {
+        var main = data.main || {};
+        accounts = data.accounts || [];
+        accountStatus = data.account_status || {};
+        var activeFound = false;
+        accounts.forEach(function(account) { if (account.active) activeFound = true; });
+        if (!activeFound && accounts.length) accounts[0].active = 1;
+        document.getElementById('ca-enabled').checked = !!main.enabled;
+        setValue('ca-switch-balance', main.switch_balance || '0');
+        setValue('ca-switch-flow', main.switch_flow || '0');
+        setValue('ca-portal-url', main.portal_url);
+        setValue('ca-status-url', main.status_url);
+        setValue('ca-logout-url', main.logout_url);
+        setValue('ca-interval', main.interval || '300');
+        setValue('ca-pid', main.pid || '2');
+        setValue('ca-calg', main.calg || '12345678');
+        editingIndex = -1;
+        renderAccounts();
+    }
+
+    function collectAccounts() {
+        var result = [];
+        for (var i = 0; i < accounts.length; i++) {
+            var account = accounts[i];
+            result.push({
+                section: account.section || '',
+                active: account.active ? 1 : 0,
+                enabled: account.enabled ? 1 : 0,
+                username: account.username || '',
+                password: account.password || '',
+                priority: (i + 1) * 10
+            });
+        }
+        return result;
+    }
+
+    function formBody(values) {
+        var parts = [];
+        for (var key in values) if (Object.prototype.hasOwnProperty.call(values, key)) parts.push(encodeURIComponent(key) + '=' + encodeURIComponent(values[key]));
+        return parts.join('&');
+    }
+
+    function saveConfig() {
+        if (editingIndex >= 0) {
+            toast('请先保存或取消正在编辑的账号', true);
+            return;
+        }
+        var values = {
+            enabled: document.getElementById('ca-enabled').checked ? '1' : '0',
+            switch_balance: document.getElementById('ca-switch-balance').value || '0',
+            switch_flow: document.getElementById('ca-switch-flow').value || '0',
+            portal_url: document.getElementById('ca-portal-url').value,
+            status_url: document.getElementById('ca-status-url').value,
+            logout_url: document.getElementById('ca-logout-url').value,
+            interval: document.getElementById('ca-interval').value || '300',
+            pid: document.getElementById('ca-pid').value || '2',
+            calg: document.getElementById('ca-calg').value || '12345678',
+            accounts: JSON.stringify(collectAccounts())
+        };
+        request('POST', urls.save, formBody(values), function(ok) {
+            if (!ok) { toast('保存失败，请检查 LuCI 会话', true); return; }
+            toast('配置已保存');
+            request('GET', urls.config, null, function(success, data) { if (success) renderConfig(data); });
+        });
+    }
+
+    function updateStatus() {
+        request('GET', urls.status, null, function(ok, st) {
+            if (!ok) return;
+            var labels = {online: '在线', offline: '离线', failed: '认证失败', error: '错误', unknown: '未知', not_configured: '未配置'};
+            var state = st.state || 'unknown';
+            var dot = document.getElementById('ca-status-dot');
+            dot.className = 'ca-dot ' + state;
+            setText('ca-status-label', labels[state] || state);
+            setText('ca-status-message', st.message || '');
+            setText('ca-account', st.account || st.uid);
+            setText('ca-fee', st.fee ? st.fee + ' 元' : '—');
+            setText('ca-flow', st.flow ? st.flow + ' MB' : '—');
+            setText('ca-time', st.time ? st.time + ' 分钟' : '—');
+            if (st.account_status) accountStatus = st.account_status;
+            refreshRowStatus();
+        });
+    }
+
+    document.getElementById('ca-add-account').onclick = function() {
+        accounts.push({section: '', active: accounts.length === 0 ? 1 : 0, enabled: 1, username: '', priority: (accounts.length + 1) * 10, password_set: 0});
+        renderAccounts();
+    };
+
+    document.getElementById('ca-account-body').onclick = function(event) {
+        var button = closestNode(event.target, function(node) { return node.tagName === 'BUTTON'; });
+        if (!button) return;
+        var action = button.getAttribute('data-action');
+        if (!action) return;
+        var row = closestNode(button, function(node) {
+            return node.className && String(node.className).indexOf('ca-account-row') !== -1;
+        });
+        if (!row) return;
+        var index = parseInt(row.getAttribute('data-index'), 10);
+        if (action === 'up' && index > 0) {
+            var previous = accounts[index - 1];
+            accounts[index - 1] = accounts[index];
+            accounts[index] = previous;
+        } else if (action === 'down' && index < accounts.length - 1) {
+            var next = accounts[index + 1];
+            accounts[index + 1] = accounts[index];
+            accounts[index] = next;
+        } else if (action === 'remove') {
+            var wasActive = accounts[index].active;
+            accounts.splice(index, 1);
+            if (wasActive) {
+                var activeLeft = false;
+                accounts.forEach(function(a) { if (a.active) activeLeft = true; });
+                if (!activeLeft && accounts.length) accounts[0].active = 1;
+            }
+        } else if (action === 'edit') {
+            editingIndex = editingIndex === index ? -1 : index;
+        } else if (action === 'edit-save') {
+            var usernameInput = row.querySelector('[data-edit-field="username"]');
+            var passwordInput = row.querySelector('[data-edit-field="password"]');
+            var account = accounts[index] || {};
+            if (usernameInput) account.username = usernameInput.value;
+            if (passwordInput && passwordInput.value) {
+                account.password = passwordInput.value;
+                account.password_set = 1;
+            }
+            editingIndex = -1;
+        } else if (action === 'edit-cancel') {
+            editingIndex = -1;
+        }
+        renderAccounts();
+    };
+
+    document.getElementById('ca-account-body').onchange = function(event) {
+        var field = event.target.getAttribute ? event.target.getAttribute('data-field') : null;
+        if (!field) return;
+        var row = closestNode(event.target, function(node) {
+            return node.className && String(node.className).indexOf('ca-account-row') !== -1;
+        });
+        if (!row) return;
+        var index = parseInt(row.getAttribute('data-index'), 10);
+        if (field === 'active') {
+            accounts.forEach(function(a, i) { a.active = i === index ? 1 : 0; });
+        } else if (field === 'enabled') {
+            accounts[index].enabled = event.target.checked ? 1 : 0;
+        }
+    };
+
+    document.getElementById('ca-save').onclick = saveConfig;
+    document.getElementById('ca-login').onclick = function() {
+        request('GET', urls.login, null, function(ok, data) { toast(ok && data.success ? '登录成功' : '登录失败', !(ok && data.success)); updateStatus(); });
+    };
+    document.getElementById('ca-logout').onclick = function() {
+        request('GET', urls.logout, null, function(ok, data) { toast(ok && data.success ? '已注销' : '注销失败', !(ok && data.success)); updateStatus(); });
+    };
+
+    request('GET', urls.config, null, function(ok, data) {
+        if (!ok) { toast('读取配置失败', true); return; }
+        renderConfig(data);
+        updateStatus();
+        window.setInterval(updateStatus, 5000);
+    });
+})();
+//]]></script>
+
+<%+footer%>
