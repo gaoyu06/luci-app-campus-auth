@@ -129,6 +129,7 @@ html, .campus-auth-page { background-color: var(--background-color, #1e1e1e) !im
             <button type="button" class="ca-btn ca-btn-primary" id="ca-save">保存配置</button>
             <button type="button" class="ca-btn" id="ca-login">立即登录</button>
             <button type="button" class="ca-btn ca-btn-danger" id="ca-logout">注销</button>
+            <button type="button" class="ca-btn" id="ca-report">发送日报</button>
             <span class="ca-toolbar-note">修改账号或设置后，点击「保存配置」生效</span>
         </div>
     </section>
@@ -167,6 +168,10 @@ html, .campus-auth-page { background-color: var(--background-color, #1e1e1e) !im
             <div class="ca-field"><label for="ca-interval">检测间隔（秒）</label><input class="ca-input" id="ca-interval" type="number" min="30" step="1" /></div>
             <div class="ca-field"><label for="ca-pid">协议 PID</label><input class="ca-input" id="ca-pid" type="number" min="0" step="1" /></div>
             <div class="ca-field"><label for="ca-calg">协议参数</label><input class="ca-input" id="ca-calg" type="text" /></div>
+            <div class="ca-field"><label for="ca-balance-gap">均衡差值（MB）</label><input class="ca-input" id="ca-balance-gap" type="number" min="0" step="1" /><div class="ca-field-help">自动登录时优先用本月已用流量最少的账号；当前账号比最少的多用这么多后自动切换（会断网几秒），填写 0 表示不均衡。</div></div>
+            <div class="ca-field"><label for="ca-report-hour">日报时间（点）</label><input class="ca-input" id="ca-report-hour" type="number" min="0" max="23" step="1" /><div class="ca-field-help">每天该整点后发送一次用量日报，留空表示不发送。</div></div>
+            <div class="ca-field"><label for="ca-webhook-url">Webhook 地址</label><input class="ca-input" id="ca-webhook-url" type="text" placeholder="企业微信/钉钉/飞书机器人地址" /><div class="ca-field-help">日报、阈值切换和登录失败恢复后都会推送到这里，留空表示不通知。</div></div>
+            <div class="ca-field"><label for="ca-webhook-template">Webhook 消息模板</label><input class="ca-input" id="ca-webhook-template" type="text" placeholder='{"msgtype":"text","text":{"content":"{text}"}}' /><div class="ca-field-help">POST 的 JSON，{text} 替换为通知内容。留空适用于企业微信和钉钉；飞书填 {"msg_type":"text","content":{"text":"{text}"}}。</div></div>
         </div>
     </details>
 </div>
@@ -180,7 +185,8 @@ html, .campus-auth-page { background-color: var(--background-color, #1e1e1e) !im
         status: '<%=url("admin", "network", "campus_auth", "status")%>',
         save: '<%=url("admin", "network", "campus_auth", "save")%>',
         login: '<%=url("admin", "network", "campus_auth", "login")%>',
-        logout: '<%=url("admin", "network", "campus_auth", "logout")%>'
+        logout: '<%=url("admin", "network", "campus_auth", "logout")%>',
+        report: '<%=url("admin", "network", "campus_auth", "report")%>'
     };
     var accounts = [];
     var accountStatus = {};
@@ -344,6 +350,10 @@ html, .campus-auth-page { background-color: var(--background-color, #1e1e1e) !im
         setValue('ca-interval', main.interval || '300');
         setValue('ca-pid', main.pid || '2');
         setValue('ca-calg', main.calg || '12345678');
+        setValue('ca-balance-gap', main.balance_gap || '0');
+        setValue('ca-report-hour', main.report_hour);
+        setValue('ca-webhook-url', main.webhook_url);
+        setValue('ca-webhook-template', main.webhook_template);
         editingIndex = -1;
         renderAccounts();
     }
@@ -385,6 +395,10 @@ html, .campus-auth-page { background-color: var(--background-color, #1e1e1e) !im
             interval: document.getElementById('ca-interval').value || '300',
             pid: document.getElementById('ca-pid').value || '2',
             calg: document.getElementById('ca-calg').value || '12345678',
+            balance_gap: document.getElementById('ca-balance-gap').value || '0',
+            report_hour: document.getElementById('ca-report-hour').value,
+            webhook_url: document.getElementById('ca-webhook-url').value,
+            webhook_template: document.getElementById('ca-webhook-template').value,
             accounts: JSON.stringify(collectAccounts())
         };
         request('POST', urls.save, formBody(values), function(ok) {
@@ -479,6 +493,9 @@ html, .campus-auth-page { background-color: var(--background-color, #1e1e1e) !im
     document.getElementById('ca-save').onclick = saveConfig;
     document.getElementById('ca-login').onclick = function() {
         request('GET', urls.login, null, function(ok, data) { toast(ok && data.success ? '登录成功' : '登录失败', !(ok && data.success)); updateStatus(); });
+    };
+    document.getElementById('ca-report').onclick = function() {
+        request('GET', urls.report, null, function(ok, data) { toast(ok && data.success ? '日报已发送' : '发送失败，请检查 Webhook 设置', !(ok && data.success)); });
     };
     document.getElementById('ca-logout').onclick = function() {
         request('GET', urls.logout, null, function(ok, data) { toast(ok && data.success ? '已注销' : '注销失败', !(ok && data.success)); updateStatus(); });

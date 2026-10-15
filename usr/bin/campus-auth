@@ -1,8 +1,13 @@
 #!/bin/sh
 
 STATE="/var/run/campus_auth.state"
-ACCT_STATE="/var/run/campus_auth_acct.state"
+ACCT_STATE="/etc/campus_auth.acct"
+REPORT_STAMP="/etc/campus_auth.report"
+OUTAGE="/var/run/campus_auth.outage"
+NO_SPARE="/var/run/campus_auth.nospare"
+REJECTED="/var/run/campus_auth.rejected"
 LOG="/var/log/campus_auth.log"
+DEFAULT_TEMPLATE='{"msgtype":"text","text":{"content":"{text}"}}'
 
 cfg() {
     uci -q get "campus_auth.main.$1" 2>/dev/null || true
@@ -36,7 +41,7 @@ save_account_status() {
     if [ -f "$ACCT_STATE" ]; then
         grep -v "^$user " "$ACCT_STATE" >> "$tmp" 2>/dev/null
     fi
-    printf '%s %s %s\n' "$user" "${flow:--}" "${fee:--}" >> "$tmp"
+    printf '%s %s %s %s\n' "$user" "${flow:--}" "${fee:--}" "$(date +%Y-%m)" >> "$tmp"
     mv "$tmp" "$ACCT_STATE"
 }
 
@@ -102,7 +107,7 @@ account_value() {
 }
 
 login_account() {
-    local sec="$1" username password portal pid calg hash upass response
+    local sec="$1" username password portal pid calg hash upass response msg
     username="$(account_value "$sec" username)"
     password="$(account_value "$sec" password)"
     portal="$(cfg portal_url)"
@@ -145,12 +150,17 @@ login_account() {
         write_state "online" "登录成功" "account=$sec" "account_user=$username"
         log "login successful for $sec"
         rm -f "$response"
+        sed -i "/^$sec /d" "$REJECTED" 2>/dev/null
         status
         return 0
     fi
 
-    write_state "failed" "登录被拒绝" "account=$sec" "account_user=$username"
-    log "login rejected for $sec"
+    # 门户错误码，如 Msg=04
+    msg="$(grep -o 'Msg=[0-9]*' "$response" | head -n 1 | cut -d = -f 2)"
+    write_state "failed" "登录被拒绝（Msg=${msg:-?}）" "account=$sec" "account_user=$username"
+    log "login rejected for $sec (Msg=${msg:-?})"
+    sed -i "/^$sec /d" "$REJECTED" 2>/dev/null
+    printf '%s %s %s\n' "$sec" "$(date +%Y-%m-%d)" "${msg:-?}" >> "$REJECTED"
     rm -f "$response"
     return 1
 }
@@ -167,6 +177,44 @@ login() {
         logout >/dev/null 2>&1 || true
     fi
     login_account "$sec"
+}
+
+# 本月缓存中某用户的已用流量（MB），没有记录按 0 计
+cached_flow() {
+    cat "$ACCT_STATE" 2>/dev/null | awk -v u="$1" -v m="$(date +%Y-%m)" \
+        '$1 == u && $4 == m && $2 != "-" { f = $2 } END { print f + 0 }'
+}
+
+# 按本月已用流量从少到多列出可用账号，同流量按优先级；跳过已达余额或流量阈值、以及今天被门户拒绝过的账号
+accounts_by_usage() {
+    local sec n=0 today
+    today="$(date +%Y-%m-%d)"
+    {
+        cat "$ACCT_STATE" 2>/dev/null
+        echo '#'
+        sorted_accounts | while IFS='|' read -r _ sec; do
+            n=$((n + 1))
+            grep -q "^$sec $today " "$REJECTED" 2>/dev/null && continue
+            printf '%s %s %s\n' "$n" "$sec" "$(account_value "$sec" username)"
+        done
+    } | awk -v m="$(date +%Y-%m)" -v t="$(cfg switch_balance)" -v l="$(cfg switch_flow)" '
+        $1 == "#" { part = 1; next }
+        !part { if ($4 == m) { flow[$1] = $2; fee[$1] = $3 } next }
+        {
+            f = ($3 in flow && flow[$3] != "-") ? flow[$3] + 0 : 0
+            if (t + 0 > 0 && ($3 in fee) && fee[$3] != "-" && fee[$3] + 0 <= t + 0) next
+            if (l + 0 > 0 && f >= l + 0) next
+            printf "%015.3f %05d %s\n", f, $1, $2
+        }' | sort | cut -d ' ' -f 3
+}
+
+# 按用量从少到多依次尝试，直到登录成功；都达到阈值时仍按优先级兜底尝试，保证能上网
+auto_login() {
+    local sec
+    for sec in $({ accounts_by_usage; sorted_accounts | cut -d '|' -f 2; } | awk '!seen[$0]++'); do
+        login_account "$sec" && return 0
+    done
+    return 1
 }
 
 status() {
@@ -256,43 +304,112 @@ logout() {
     return 1
 }
 
+# 切到用量最少的其他可用账号；新账号登录失败时交给 auto_login 继续尝试
 switch_account() {
-    local current next line found
+    local current next
     current="$(state_value account)"
-    next=""
-    found=0
-    while IFS='|' read -r _ line; do
-        [ -n "$line" ] || continue
-        if [ "$found" -eq 1 ]; then
-            next="$line"
-            break
-        fi
-        [ "$line" = "$current" ] && found=1
-    done <<EOF
-$(sorted_accounts)
-EOF
-
-    [ -n "$next" ] || next="$(first_account)"
+    next="$(accounts_by_usage | grep -vx "$current" | head -n 1)"
     [ -n "$next" ] || return 1
-    [ "$next" = "$current" ] && return 1
 
     logout >/dev/null 2>&1 || true
-    login_account "$next"
+    login_account "$next" || auto_login
+}
+
+notify() {
+    local url tpl text body
+    url="$(cfg webhook_url)"
+    [ -n "$url" ] || return 0
+    tpl="$(cfg webhook_template)"
+    [ -n "$tpl" ] || tpl="$DEFAULT_TEMPLATE"
+    # 转义成 JSON 字符串内容后替换模板里的 {text}
+    text="$(printf '%s' "$1" | awk 'BEGIN { ORS = "" } {
+        gsub(/\\/, "\\\\"); gsub(/"/, "\\\""); gsub(/\t/, " ")
+        if (NR > 1) print "\\n"
+        print
+    }')"
+    body="$(printf '%s' "$tpl" | T="$text" awk '{
+        out = ""; s = $0
+        while ((i = index(s, "{text}")) > 0) { out = out substr(s, 1, i - 1) ENVIRON["T"]; s = substr(s, i + 6) }
+        print out s
+    }')"
+    if curl -sS --connect-timeout 5 --max-time 15 -H 'Content-Type: application/json' \
+        -d "$body" -o /dev/null "$url"; then
+        return 0
+    fi
+    log "webhook notify failed"
+    return 1
+}
+
+report_text() {
+    local current
+    current="$(state_value account_user)"
+    printf '校园网用量日报 %s\n' "$(date '+%Y-%m-%d %H:%M')"
+    printf '状态：%s，当前账号：%s\n' "$(state_value state)" "${current:-无}"
+    {
+        cat "$ACCT_STATE" 2>/dev/null
+        echo '#'
+        sorted_accounts | while IFS='|' read -r _ sec; do
+            account_value "$sec" username
+        done
+    } | awk -v m="$(date +%Y-%m)" '
+        $1 == "#" { part = 1; next }
+        !part { if ($4 == m) { flow[$1] = $2; fee[$1] = $3 } next }
+        {
+            if ($1 in flow) {
+                printf "%s：已用 %s MB，余额 %s 元\n", $1, flow[$1], fee[$1]
+                if (flow[$1] != "-") total += flow[$1]
+            } else {
+                printf "%s：本月暂无数据\n", $1
+            }
+        }
+        END { printf "本月合计：%.2f GB", total / 1024 }'
+    while read -r sec day msg; do
+        [ "$day" = "$(date +%Y-%m-%d)" ] && printf '\n%s：今天登录被门户拒绝（Msg=%s）' "$(account_value "$sec" username)" "$msg"
+    done 2>/dev/null < "$REJECTED"
+}
+
+report() {
+    [ -n "$(cfg webhook_url)" ] || return 1
+    status >/dev/null 2>&1
+    notify "$(report_text)"
+}
+
+# 每天到 report_hour 点后发一次日报
+daily_report() {
+    local hour today
+    hour="$(cfg report_hour)"
+    [ -n "$hour" ] || return 0
+    today="$(date +%Y-%m-%d)"
+    [ "$(cat "$REPORT_STAMP" 2>/dev/null)" = "$today" ] && return 0
+    [ "$(date +%H | sed 's/^0//')" -ge "$hour" ] 2>/dev/null || return 0
+    printf '%s\n' "$today" > "$REPORT_STAMP"
+    notify "$(report_text)"
 }
 
 monitor() {
-    local interval threshold flow_limit state fee flow should_switch
+    local interval threshold flow_limit gap state fee flow should_switch user best
     interval="$(cfg interval)"
     interval="${interval:-300}"
     threshold="$(cfg switch_balance)"
     threshold="${threshold:-0}"
     flow_limit="$(cfg switch_flow)"
     flow_limit="${flow_limit:-0}"
+    gap="$(cfg balance_gap)"
+    gap="${gap:-0}"
     while :; do
         status >/dev/null 2>&1
         state="$(state_value state)"
         if [ "$state" = "offline" ]; then
-            login >/dev/null 2>&1
+            if auto_login >/dev/null 2>&1; then
+                if [ -f "$OUTAGE" ]; then
+                    notify "校园网自动登录曾全部失败（自 $(cat "$OUTAGE") 起），现已恢复，当前账号：$(state_value account_user)"
+                    rm -f "$OUTAGE"
+                fi
+            else
+                # 离线时发不出通知，记下开始时间，恢复后补报
+                [ -f "$OUTAGE" ] || date '+%Y-%m-%d %H:%M:%S' > "$OUTAGE"
+                log "auto login failed for all accounts"
+            fi
         elif [ "$state" = "online" ]; then
             fee="$(state_value fee)"
             flow="$(state_value flow)"
@@ -303,15 +420,36 @@ monitor() {
             if [ "$should_switch" -eq 0 ] && [ -n "$flow" ] && awk -v flow="$flow" -v limit="$flow_limit" 'BEGIN { exit !(limit > 0 && flow >= limit) }'; then
                 should_switch=1
             fi
+            user="$(state_value account_user)"
             if [ "$should_switch" -eq 1 ]; then
-                switch_account >/dev/null 2>&1
+                if switch_account >/dev/null 2>&1; then
+                    notify "账号 $user 已达到切换阈值（已用 $flow MB，余额 $fee 元），已切换到 $(state_value account_user)"
+                elif [ "$(cat "$NO_SPARE" 2>/dev/null)" != "$user" ]; then
+                    # 无账号可切时每个账号只提醒一次，避免每个检测周期重复推送
+                    printf '%s' "$user" > "$NO_SPARE"
+                    notify "账号 $user 已达到切换阈值（已用 $flow MB，余额 $fee 元），但没有其他可用账号"
+                fi
+            elif [ "$gap" -gt 0 ] 2>/dev/null; then
+                # 当前账号比用量最少的账号多用 gap MB 以上时切过去
+                best="$(accounts_by_usage | head -n 1)"
+                if [ -n "$best" ] && [ "$best" != "$(state_value account)" ] && \
+                    awk -v a="$flow" -v b="$(cached_flow "$(account_value "$best" username)")" -v g="$gap" 'BEGIN { exit !(a - b >= g) }'; then
+                    log "balance: switching from $user to $best"
+                    switch_account >/dev/null 2>&1
+                fi
             fi
+            daily_report
         fi
-        sleep "$interval"
+        # 开机时网络可能还没就绪，状态页不可达时短间隔重试
+        if [ "$(state_value state)" = "unknown" ]; then
+            sleep 15
+        else
+            sleep "$interval"
+        fi
     done
 }
 
 case "$1" in
-    login|status|logout|switch|monitor) ensure_legacy_account; "$1" ;;
-    *) echo "Usage: $0 {login|status|logout|switch|monitor}" >&2; exit 2 ;;
+    login|status|logout|switch|monitor|report) ensure_legacy_account; "$1" ;;
+    *) echo "Usage: $0 {login|status|logout|switch|monitor|report}" >&2; exit 2 ;;
 esac

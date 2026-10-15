@@ -14,11 +14,12 @@ end
 
 local function account_status_map()
     local fs = require "nixio.fs"
-    local acct_file = fs.readfile("/var/run/campus_auth_acct.state") or ""
+    local acct_file = fs.readfile("/etc/campus_auth.acct") or ""
+    local month = os.date("%Y-%m")
     local result = {}
     for line in acct_file:gmatch("[^\r\n]+") do
-        local sec, flow, fee = line:match("^(%S+)%s+(%S+)%s+(%S+)%s*$")
-        if sec then
+        local sec, flow, fee, m = line:match("^(%S+)%s+(%S+)%s+(%S+)%s+(%S+)%s*$")
+        if sec and m == month then
             result[sec] = { flow = flow, fee = fee }
         end
     end
@@ -32,6 +33,7 @@ function index()
     entry({"admin", "network", "campus_auth", "save"}, call("save")).leaf = true
     entry({"admin", "network", "campus_auth", "login"}, call("login")).leaf = true
     entry({"admin", "network", "campus_auth", "logout"}, call("logout")).leaf = true
+    entry({"admin", "network", "campus_auth", "report"}, call("report")).leaf = true
 end
 
 function config()
@@ -67,7 +69,11 @@ function config()
             switch_balance = uci:get("campus_auth", "main", "switch_balance") or "0",
             switch_flow = uci:get("campus_auth", "main", "switch_flow") or "0",
             pid = uci:get("campus_auth", "main", "pid") or "2",
-            calg = uci:get("campus_auth", "main", "calg") or "12345678"
+            calg = uci:get("campus_auth", "main", "calg") or "12345678",
+            balance_gap = uci:get("campus_auth", "main", "balance_gap") or "0",
+            report_hour = uci:get("campus_auth", "main", "report_hour") or "",
+            webhook_url = uci:get("campus_auth", "main", "webhook_url") or "",
+            webhook_template = uci:get("campus_auth", "main", "webhook_template") or ""
         },
         accounts = accounts,
         account_status = account_status_map()
@@ -114,6 +120,10 @@ function save()
     uci:set("campus_auth", "main", "switch_flow", form("switch_flow", "0"))
     uci:set("campus_auth", "main", "pid", form("pid", "2"))
     uci:set("campus_auth", "main", "calg", form("calg", "12345678"))
+    uci:set("campus_auth", "main", "balance_gap", form("balance_gap", "0"))
+    uci:set("campus_auth", "main", "report_hour", form("report_hour", ""))
+    uci:set("campus_auth", "main", "webhook_url", form("webhook_url", ""))
+    uci:set("campus_auth", "main", "webhook_template", form("webhook_template", ""))
 
     local old = {}
     local old_sections = {}
@@ -169,4 +179,9 @@ end
 function logout()
     local sys = require "luci.sys"
     reply({success = sys.call("/usr/bin/campus-auth logout >/dev/null 2>&1") == 0 and 1 or 0})
+end
+
+function report()
+    local sys = require "luci.sys"
+    reply({success = sys.call("/usr/bin/campus-auth report >/dev/null 2>&1") == 0 and 1 or 0})
 end
