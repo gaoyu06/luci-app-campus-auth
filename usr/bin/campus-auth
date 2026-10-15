@@ -6,6 +6,7 @@ REPORT_STAMP="/etc/campus_auth.report"
 OUTAGE="/var/run/campus_auth.outage"
 NO_SPARE="/var/run/campus_auth.nospare"
 REJECTED="/var/run/campus_auth.rejected"
+LOCK="/var/lock/campus_auth.lock"
 LOG="/var/log/campus_auth.log"
 DEFAULT_TEMPLATE='{"msgtype":"text","text":{"content":"{text}"}}'
 
@@ -386,60 +387,78 @@ daily_report() {
     notify "$(report_text)"
 }
 
-monitor() {
-    local interval threshold flow_limit gap state fee flow should_switch user best
-    interval="$(cfg interval)"
-    interval="${interval:-300}"
+# 检查一次状态：掉线则登录，在线则按阈值和均衡切换、发日报
+check() {
+    local threshold flow_limit gap state fee flow should_switch user best
     threshold="$(cfg switch_balance)"
     threshold="${threshold:-0}"
     flow_limit="$(cfg switch_flow)"
     flow_limit="${flow_limit:-0}"
     gap="$(cfg balance_gap)"
     gap="${gap:-0}"
-    while :; do
-        status >/dev/null 2>&1
-        state="$(state_value state)"
-        if [ "$state" = "offline" ]; then
-            if auto_login >/dev/null 2>&1; then
-                if [ -f "$OUTAGE" ]; then
-                    notify "校园网自动登录曾全部失败（自 $(cat "$OUTAGE") 起），现已恢复，当前账号：$(state_value account_user)"
-                    rm -f "$OUTAGE"
-                fi
-            else
-                # 离线时发不出通知，记下开始时间，恢复后补报
-                [ -f "$OUTAGE" ] || date '+%Y-%m-%d %H:%M:%S' > "$OUTAGE"
-                log "auto login failed for all accounts"
+    status >/dev/null 2>&1
+    state="$(state_value state)"
+    if [ "$state" = "offline" ]; then
+        if auto_login >/dev/null 2>&1; then
+            if [ -f "$OUTAGE" ]; then
+                notify "校园网自动登录曾全部失败（自 $(cat "$OUTAGE") 起），现已恢复，当前账号：$(state_value account_user)"
+                rm -f "$OUTAGE"
             fi
-        elif [ "$state" = "online" ]; then
-            fee="$(state_value fee)"
-            flow="$(state_value flow)"
-            should_switch=0
-            if [ -n "$fee" ] && awk -v fee="$fee" -v threshold="$threshold" 'BEGIN { exit !(threshold > 0 && fee <= threshold) }'; then
-                should_switch=1
-            fi
-            if [ "$should_switch" -eq 0 ] && [ -n "$flow" ] && awk -v flow="$flow" -v limit="$flow_limit" 'BEGIN { exit !(limit > 0 && flow >= limit) }'; then
-                should_switch=1
-            fi
-            user="$(state_value account_user)"
-            if [ "$should_switch" -eq 1 ]; then
-                if switch_account >/dev/null 2>&1; then
-                    notify "账号 $user 已达到切换阈值（已用 $flow MB，余额 $fee 元），已切换到 $(state_value account_user)"
-                elif [ "$(cat "$NO_SPARE" 2>/dev/null)" != "$user" ]; then
-                    # 无账号可切时每个账号只提醒一次，避免每个检测周期重复推送
-                    printf '%s' "$user" > "$NO_SPARE"
-                    notify "账号 $user 已达到切换阈值（已用 $flow MB，余额 $fee 元），但没有其他可用账号"
-                fi
-            elif [ "$gap" -gt 0 ] 2>/dev/null; then
-                # 当前账号比用量最少的账号多用 gap MB 以上时切过去
-                best="$(accounts_by_usage | head -n 1)"
-                if [ -n "$best" ] && [ "$best" != "$(state_value account)" ] && \
-                    awk -v a="$flow" -v b="$(cached_flow "$(account_value "$best" username)")" -v g="$gap" 'BEGIN { exit !(a - b >= g) }'; then
-                    log "balance: switching from $user to $best"
-                    switch_account >/dev/null 2>&1
-                fi
-            fi
-            daily_report
+        else
+            # 离线时发不出通知，记下开始时间，恢复后补报
+            [ -f "$OUTAGE" ] || date '+%Y-%m-%d %H:%M:%S' > "$OUTAGE"
+            log "auto login failed for all accounts"
         fi
+    elif [ "$state" = "online" ]; then
+        fee="$(state_value fee)"
+        flow="$(state_value flow)"
+        should_switch=0
+        if [ -n "$fee" ] && awk -v fee="$fee" -v threshold="$threshold" 'BEGIN { exit !(threshold > 0 && fee <= threshold) }'; then
+            should_switch=1
+        fi
+        if [ "$should_switch" -eq 0 ] && [ -n "$flow" ] && awk -v flow="$flow" -v limit="$flow_limit" 'BEGIN { exit !(limit > 0 && flow >= limit) }'; then
+            should_switch=1
+        fi
+        user="$(state_value account_user)"
+        if [ "$should_switch" -eq 1 ]; then
+            if switch_account >/dev/null 2>&1; then
+                notify "账号 $user 已达到切换阈值（已用 $flow MB，余额 $fee 元），已切换到 $(state_value account_user)"
+            elif [ "$(cat "$NO_SPARE" 2>/dev/null)" != "$user" ]; then
+                # 无账号可切时每个账号只提醒一次，避免每个检测周期重复推送
+                printf '%s' "$user" > "$NO_SPARE"
+                notify "账号 $user 已达到切换阈值（已用 $flow MB，余额 $fee 元），但没有其他可用账号"
+            fi
+        elif [ "$gap" -gt 0 ] 2>/dev/null; then
+            # 当前账号比用量最少的账号多用 gap MB 以上时切过去
+            best="$(accounts_by_usage | head -n 1)"
+            if [ -n "$best" ] && [ "$best" != "$(state_value account)" ] && \
+                awk -v a="$flow" -v b="$(cached_flow "$(account_value "$best" username)")" -v g="$gap" 'BEGIN { exit !(a - b >= g) }'; then
+                log "balance: switching from $user to $best"
+                switch_account >/dev/null 2>&1
+            fi
+        fi
+        daily_report
+    fi
+}
+
+# 立即登录：仅在离线时按用量选账号登录，供公开状态页使用
+auto() {
+    status >/dev/null 2>&1
+    [ "$(state_value state)" = "online" ] && return 0
+    auto_login
+}
+
+# 登录、切换等操作可能同时来自后台监控、LuCI 和公开状态页，串行执行
+with_lock() {
+    flock 9 && "$@"
+} 9>"$LOCK"
+
+monitor() {
+    local interval
+    interval="$(cfg interval)"
+    interval="${interval:-300}"
+    while :; do
+        with_lock check
         # 开机时网络可能还没就绪，状态页不可达时短间隔重试
         if [ "$(state_value state)" = "unknown" ]; then
             sleep 15
@@ -450,6 +469,8 @@ monitor() {
 }
 
 case "$1" in
-    login|status|logout|switch|monitor|report) ensure_legacy_account; "$1" ;;
-    *) echo "Usage: $0 {login|status|logout|switch|monitor|report}" >&2; exit 2 ;;
+    monitor) ensure_legacy_account; monitor ;;
+    login|status|logout|report|auto) ensure_legacy_account; with_lock "$1" ;;
+    switch) ensure_legacy_account; with_lock switch_account ;;
+    *) echo "Usage: $0 {login|status|logout|switch|monitor|report|auto}" >&2; exit 2 ;;
 esac

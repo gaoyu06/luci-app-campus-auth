@@ -13,7 +13,7 @@ define Package/luci-app-campus-auth
   CATEGORY:=LuCI
   SUBMENU:=3. Applications
   TITLE:=Campus network authentication for LuCI
-  DEPENDS:=+luci-base +rpcd +curl
+  DEPENDS:=+luci-base +rpcd +curl +flock
 endef
 
 define Package/luci-app-campus-auth/description
@@ -30,7 +30,8 @@ endef
 define Package/luci-app-campus-auth/install
 	$(CP) ./etc $(1)/
 	$(CP) ./usr $(1)/
-	chmod 0755 $(1)/etc/init.d/campus_auth $(1)/usr/bin/campus-auth
+	$(CP) ./www $(1)/
+	chmod 0755 $(1)/etc/init.d/campus_auth $(1)/usr/bin/campus-auth $(1)/www/campus-auth/cgi-bin/api
 endef
 
 $(eval $(call BuildPackage,luci-app-campus-auth))

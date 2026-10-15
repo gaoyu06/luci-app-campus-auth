@@ -1,0 +1,19 @@
+#!/bin/sh
+# 在 8088 端口开放无需登录的校园网状态页；WAN 区默认拒绝入站，只有局域网能访问
+
+uci -q get uhttpd.campus_auth >/dev/null && exit 0
+
+uci batch <<EOF
+set uhttpd.campus_auth=uhttpd
+add_list uhttpd.campus_auth.listen_http='0.0.0.0:8088'
+add_list uhttpd.campus_auth.listen_http='[::]:8088'
+set uhttpd.campus_auth.home='/www/campus-auth'
+set uhttpd.campus_auth.cgi_prefix='/cgi-bin'
+set uhttpd.campus_auth.index_page='index.html'
+set uhttpd.campus_auth.rfc1918_filter='1'
+set uhttpd.campus_auth.max_requests='10'
+set uhttpd.campus_auth.script_timeout='60'
+set uhttpd.campus_auth.network_timeout='30'
+EOF
+uci commit uhttpd
+exit 0
