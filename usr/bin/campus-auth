@@ -184,12 +184,24 @@ status() {
         return 1
     fi
 
-    if grep -q 'Dr.COMWebLoginID_1.htm\|Dr.COMWebLoginID_3.htm\|已经成功登录' "$response"; then
+    # 未登录页的跳转脚本里也含 Dr.COMWebLoginID_3.htm，只有在线页才是 _1.htm
+    if grep -q 'Dr.COMWebLoginID_1.htm' "$response"; then
         time="$(value_from_html time "$response")"
         flow="$(value_from_html flow "$response")"
         fee="$(value_from_html fee "$response")"
         uid="$(value_from_html uid "$response")"
         v4ip="$(value_from_html v4ip "$response")"
+        # 门户上实际在线的账号可能不是插件上次登录的账号（如在网页上手动登录过），以 uid 为准
+        if [ -n "$uid" ] && [ "$uid" != "$account_user" ]; then
+            local sec
+            for sec in $(account_sections); do
+                if [ "$(account_value "$sec" username)" = "$uid" ]; then
+                    account="$sec"
+                    account_user="$uid"
+                    break
+                fi
+            done
+        fi
         local flow_int flow_frac flow_display fee_int fee_frac fee_display
         flow_int=0
         flow_frac=0
